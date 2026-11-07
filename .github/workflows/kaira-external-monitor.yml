@@ -1,0 +1,79 @@
+# Anillo B — sonda externa de Kaira. PLANTILLA: no está activa en este repositorio.
+# Activa desde el 2026-11-07 en el repo público ManuelCadena/kaira-uptime-probe (MONITOR_DIR: .),
+# porque los repos públicos no consumen minutos de Actions. En un repo privado con GitHub Pro
+# (3,000 min/mes), */5 consumiría ~8,640 min/mes. Ver docs/operations/MONITORING_SYSTEM.md §8.
+name: kaira-external-monitor
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      send_test:
+        description: 'Enviar WhatsApp de prueba en lugar de sondear'
+        type: boolean
+        default: false
+
+concurrency:
+  group: kaira-external-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write # keepalive: GitHub desactiva los cron de repos públicos tras 60 días sin actividad
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      MONITOR_DIR: .
+      EXTERNAL_STATE_PATH: .monitor-state/external-state.json
+      KAIRA_PUBLIC_URL: https://mykaira.ai
+      AWS_REGION: us-west-2
+      EXTERNAL_EC2_REBOOT: ${{ vars.EXTERNAL_EC2_REBOOT }}
+      EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.KAIRA_MONITOR_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.KAIRA_MONITOR_AWS_SECRET_ACCESS_KEY }}
+      HEALTH_TOKEN: ${{ secrets.KAIRA_HEALTH_TOKEN }}
+      TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+      TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
+      TWILIO_WHATSAPP_FROM: ${{ secrets.TWILIO_WHATSAPP_FROM }}
+      TWILIO_WA_TEMPLATE_SID: ${{ secrets.TWILIO_WA_TEMPLATE_SID }}
+      TWILIO_SMS_FROM: ${{ secrets.TWILIO_SMS_FROM }}
+      KAIRA_ALERT_WHATSAPP_TO: ${{ secrets.KAIRA_ALERT_WHATSAPP_TO }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Restaurar estado de incidentes
+        uses: actions/cache/restore@v4
+        with:
+          path: .monitor-state
+          key: kaira-ext-state-${{ github.run_id }}
+          restore-keys: kaira-ext-state-
+
+      - name: WhatsApp de prueba
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_test }}
+        run: node "$MONITOR_DIR/external-probe.mjs" --send-test
+
+      - name: Sondear y remediar
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.send_test) }}
+        run: node "$MONITOR_DIR/external-probe.mjs"
+
+      - name: Guardar estado de incidentes
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .monitor-state
+          key: kaira-ext-state-${{ github.run_id }}
+
+      - name: Keepalive del cron
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/kaira-external-monitor.yml/enable"
