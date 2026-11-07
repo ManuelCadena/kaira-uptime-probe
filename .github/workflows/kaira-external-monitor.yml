@@ -13,6 +13,10 @@ on:
         description: 'Enviar WhatsApp de prueba en lugar de sondear'
         type: boolean
         default: false
+      verify_aws:
+        description: 'Verificar credenciales IAM (describe-instance-status, sin reiniciar)'
+        type: boolean
+        default: false
 
 concurrency:
   group: kaira-external-monitor
@@ -55,6 +59,10 @@ jobs:
           path: .monitor-state
           key: kaira-ext-state-${{ github.run_id }}
           restore-keys: kaira-ext-state-
+
+      - name: Verificar credenciales IAM (sin reiniciar)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_aws }}
+        run: aws ec2 describe-instance-status --instance-ids "$EC2_INSTANCE_ID" --include-all-instances --region "$AWS_REGION" --query 'InstanceStatuses[].[InstanceState.Name,SystemStatus.Status,InstanceStatus.Status]' --output text
 
       - name: WhatsApp de prueba
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.send_test }}
