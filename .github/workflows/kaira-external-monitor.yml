@@ -7,6 +7,11 @@ name: kaira-external-monitor
 on:
   schedule:
     - cron: '*/5 * * * *'
+  # repository_dispatch permite que un scheduler externo (cron-job.org, CF Worker, etc.)
+  # dispare la sonda cada 5 min: el cron nativo de GitHub se atrasa horas en repos con
+  # poca actividad (medido 2026-11-13: ~3-5 corridas/dia en vez de */5).
+  repository_dispatch:
+    types: [probe]
   workflow_dispatch:
     inputs:
       send_test:
